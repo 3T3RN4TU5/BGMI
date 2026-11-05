@@ -1,0 +1,20 @@
+# BMSD 2026 roster and aliases. Tags from the PRD §6 sidebar list.
+# org names and nameplate aliases: confirm with Jeevan (PRD §14).
+tournament: BMSD 2026
+teams:
+  - { tag: GENS, org: null, aliases: [] }
+  - { tag: NBE,  org: null, aliases: [Nebula] }
+  - { tag: MYTH, org: null, aliases: [] }
+  - { tag: GODL, org: null, aliases: [GodL] }
+  - { tag: NINZ, org: null, aliases: [Ninza] }
+  - { tag: WELT, org: null, aliases: [WELTw] }
+  - { tag: GDR,  org: null, aliases: [GDRx] }
+  - { tag: V1BA, org: null, aliases: [] }
+  - { tag: BLEG, org: null, aliases: [BAx] }
+  - { tag: SOUL, org: null, aliases: [iQOOSoul] }
+  - { tag: RNTX, org: null, aliases: [] }
+  - { tag: TAG,  org: Team Apex Gaming, aliases: [] }
+  - { tag: 8BIT, org: null, aliases: [] }
+  - { tag: OR,   org: null, aliases: [] }
+  - { tag: K9,   org: null, aliases: [K9x] }
+  - { tag: WF,   org: null, aliases: [] }
