@@ -22,7 +22,7 @@ from rich.table import Table
 
 from bgmi import __version__
 from bgmi.catalog import scan
-from bgmi.diskguard import DiskSpaceError, ensure_free_space, free_gb
+from bgmi.diskguard import DiskSpaceError, assert_writable, ensure_free_space, free_gb
 from bgmi.jobs import Queue
 from bgmi.logs import log, setup_logging
 from bgmi.media import MediaError, probe
@@ -317,6 +317,51 @@ def analyze(
                   f"team read {(qd.get('tag_read_share') or 0):.0%}, alive read {(qd.get('alive_read_share') or 0):.0%}, "
                   f"finishes read {(qd.get('fin_read_share') or 0):.0%} of table rows")
     console.print(f"Output: {res.out_dir}\nDebug images: {res.debug_dir}\n[dim]log: {log_path}[/dim]")
+
+
+@app.command()
+def grab(
+    video_id: str = typer.Argument(..., help="Video id or its first characters"),
+    at: list[str] = typer.Option(..., "--at", help="Time to grab, e.g. 2:21:24 (repeat --at)"),
+    overlay_id: Optional[str] = typer.Option(None, "--overlay"),
+    settings_path: Optional[Path] = SettingsOpt,
+) -> None:
+    """Save single frames to data_root/debug/<video>/grab/ and print scene + zone diagnostics."""
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    from bgmi.media import iter_frames  # noqa: PLC0415
+    from bgmi.overlays import box  # noqa: PLC0415
+    from bgmi.scene import classify_scene  # noqa: PLC0415
+    from bgmi.zone import detect_zone, ring_candidates  # noqa: PLC0415
+
+    s = _settings(settings_path)
+    v = _find_video(Queue(s.state_db), video_id)
+    ov = _overlay(s, v, overlay_id)
+    out = Path(s.debug_dir) / v["video_id"] / "grab"
+    assert_writable(s, out)
+    out.mkdir(parents=True, exist_ok=True)
+    path = s.videos_root / v["rel_path"]
+    for a in at:
+        t = _hms_to_s(a) or 0.0
+        got = next(iter(iter_frames(s, path, t, t + 1.0, 1.0)), None)
+        if got is None:
+            console.print(f"{a}: no frame")
+            continue
+        frame = got[1]
+        stem = a.replace(":", "")
+        cv2.imwrite(str(out / f"{stem}.png"), frame)
+        sc = classify_scene(frame, ov)
+        line = f"{a}: scene {sc.scene} ({sc.confidence:.2f})"
+        if sc.scene in ("map_view", "match_start"):
+            z = detect_zone(frame, ov, sc.scene)
+            x1, y1, x2, y2 = (box(ov, "layouts", "map_view", "viewport") if sc.scene == "map_view"
+                              else box(ov, "layouts", "match_start", "map_box"))
+            m = ring_candidates(frame[y1:y2, x1:x2], ov.get("zone") or {})
+            cv2.imwrite(str(out / f"{stem}_ringmask.png"), (m * 255).astype(np.uint8))
+            line += f"; zone found={z.found} r={z.r} cov={z.coverage} ({z.detail}); ring px {int(m.sum())}"
+        console.print(line)
+    console.print(f"Saved to {out}")
 
 
 @app.command()

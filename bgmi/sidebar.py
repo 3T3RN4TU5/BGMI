@@ -154,8 +154,13 @@ def read_bars(frame: np.ndarray, overlay: dict[str, Any], k: int) -> tuple[tuple
             # an empty slot is grey (dead); anything else (e.g. a pop-up over the table) is unknown
             med = np.median(col.reshape(-1, 3), axis=0)
             grey = float(med.max() - med.min()) <= 50 and 40 <= float(med.mean()) <= 170
-            states.append(meaning["grey"] if grey else "unknown")
-            health.append(0.0)
+            if not grey and n_white >= 1 and n_red == 0:
+                # a 1 px white stub on a dark slot: a player on very low health
+                states.append(meaning["white"])
+                health.append(round(n_white / len(white_rows), 2) if meaning["white"] == "alive" else 0.0)
+            else:
+                states.append(meaning["grey"] if grey else "unknown")
+                health.append(0.0)
     return tuple(states), tuple(health)
 
 

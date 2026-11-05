@@ -241,3 +241,16 @@ def test_bar_meaning_is_per_overlay(ov):
     ov2["bars"]["meaning"] = {"red": "dead", "grey": "knocked"}
     reads = read_sidebar(synth.map_view(ov2, _rows(synth.TAGS, ["00"] * 16, ["AKDD"] * 16)), ov2, GlyphBook())
     assert reads[0].bars == ("alive", "dead", "knocked", "knocked") and reads[0].alive == 3
+
+
+def test_low_health_stub_reads_alive(ov):
+    from bgmi.sidebar import read_bars, row_top
+    f = synth.map_view(ov)
+    sb = ov["layouts"]["map_view"]["sidebar_left"]
+    t, x = row_top(ov, 0), int(sb["bars"]["x"][0])
+    f[t + 11:t + 33, x:x + 4] = (30, 20, 15)        # empty (dark) slot
+    f[t + 32, x:x + 4] = (250, 250, 250)            # 1 px of health left
+    states, health = read_bars(f, ov, 0)
+    assert states[0] == "alive" and 0 < health[0] < 0.1
+    f[t + 32, x:x + 4] = (30, 20, 15)               # nothing white: not alive, not grey
+    assert read_bars(f, ov, 0)[0][0] == "unknown"
