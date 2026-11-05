@@ -74,3 +74,34 @@ def grab_frame(settings: Settings, path: Path, t_s: float, size: tuple[int, int]
     if res.returncode != 0 or len(res.stdout) != w * h * 3:
         return None
     return np.frombuffer(res.stdout, dtype=np.uint8).reshape(h, w, 3)
+
+
+def iter_frames(settings: Settings, path: Path, start_s: float, end_s: float, every_s: float,
+                size: tuple[int, int] = (1280, 720)):
+    """Yield (t_s, BGR frame) every `every_s` seconds in [start_s, end_s), streamed from one ffmpeg.
+
+    Frames go through a pipe and are never written to disk.
+    """
+    w, h = size
+    dur = max(end_s - start_s, 0)
+    if dur <= 0 or every_s <= 0:
+        return
+    cmd = [
+        settings.tool("ffmpeg"), "-v", "error", "-ss", f"{max(start_s, 0):.3f}", "-i", str(path),
+        "-t", f"{dur:.3f}", "-vf", f"fps=1/{every_s:g},scale={w}:{h}", "-an",
+        "-f", "rawvideo", "-pix_fmt", "bgr24", "pipe:1",
+    ]
+    n = w * h * 3
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        i = 0
+        while True:
+            buf = proc.stdout.read(n)
+            if len(buf) < n:
+                break
+            yield start_s + i * every_s, np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
+            i += 1
+    finally:
+        proc.stdout.close()
+        proc.kill()
+        proc.wait()
