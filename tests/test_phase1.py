@@ -220,6 +220,21 @@ def test_run_writes_outputs(make_settings, ov):
     assert len(res.teams) == 110 * 16 and set(res.teams["alive"]) == {4}
 
 
+def test_long_full_map_screen_leaves_room_for_map_debug_images(make_settings, ov):
+    s = make_settings()
+    tags = synth.TAGS
+    book = GlyphBook()
+    learn(book, synth.map_view(ov, _rows(tags, ["00"] * 16, ["AAAA"] * 16)), ov, tags, ["00"] * 16)
+    start = synth.match_start(ov)
+    view = synth.map_view(ov, ring=(640, 360, 200))
+    frames = [(3.0 * i, start) for i in range(80)]
+    frames += [(240.0 + 3 * i, view) for i in range(110)]
+    res = run(s, {"video_id": "abc124"}, ov, book, iter(frames), None, debug_every=20, max_debug=12)
+    names = [p.name for p in res.debug_dir.glob("*.jpg")]
+    assert any("map_view" in n for n in names)
+    assert sum("match_start" in n for n in names) <= 4
+
+
 def test_bar_meaning_is_per_overlay(ov):
     import copy
     ov2 = copy.deepcopy(ov)

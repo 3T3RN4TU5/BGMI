@@ -116,17 +116,24 @@ def run(settings, video: dict[str, Any], overlay: dict[str, Any], book: GlyphBoo
 
     recs: list[FrameRecord] = []
     pending: list[tuple[FrameRecord, np.ndarray]] = []   # frames kept for debug images
-    n_map = 0
+    # separate budgets, so a long full-map screen cannot use up all the debug images
+    budget = {"map_view": max_debug, "match_start": max(4, max_debug // 6), "low": max(4, max_debug // 4)}
+    seen = {"map_view": 0, "match_start": 0}
+    every = max(debug_every, 1)
     for t, frame in frames:
         rec = analyze_frame(t, frame, overlay, book)
         recs.append(rec)
-        low = (rec.scene == "map_view" and (not (rec.zone and rec.zone.found)
-                                            or any(r.confidence < 0.5 for r in rec.rows)))
-        if rec.scene == "map_view":
-            n_map += 1
-        if (rec.scene != "other" and (n_map % max(debug_every, 1) == 1 or rec.scene == "match_start" or low)
-                and len(pending) < max_debug):
-            pending.append((rec, frame.copy()))
+        if rec.scene in seen:
+            seen[rec.scene] += 1
+            low = (rec.scene == "map_view" and (not (rec.zone and rec.zone.found)
+                                                or any(r.confidence < 0.5 for r in rec.rows)))
+            key = "low" if low else rec.scene
+            if seen[rec.scene] % every == 1 % every and budget[key] > 0:
+                budget[key] -= 1
+                pending.append((rec, frame.copy()))
+            elif low and budget["low"] > 0 and seen[rec.scene] % max(every // 4, 1) == 0:
+                budget["low"] -= 1
+                pending.append((rec, frame.copy()))
         if progress:
             progress(t)
 
