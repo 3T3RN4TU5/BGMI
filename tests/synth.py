@@ -71,3 +71,24 @@ def desk(rng=None):
     f = np.full((H, W, 3), 90, np.uint8)
     f[200:600, 100:500] = (150, 120, 100)
     return f + rng.integers(0, 8, (H, W, 3), dtype=np.uint8)
+
+
+def cluttered_ring(ov, seed, ring=(660, 420, 130), n_clutter=110, n_plates=9):
+    """A small ring mostly hidden: thin white clutter arcs (roads, letters) and dark player plates.
+
+    Only ~5% of the ring mask is ring, as on real late-game frames.
+    """
+    rng = np.random.default_rng(seed)
+    f = map_view(ov, ring=ring, rng=rng)
+    for _ in range(n_clutter):
+        c = (int(rng.integers(300, 980)), int(rng.integers(10, 710)))
+        ax = (int(rng.integers(20, 120)), int(rng.integers(20, 120)))
+        a0 = int(rng.integers(0, 360))
+        cv2.ellipse(f, c, ax, int(rng.integers(0, 180)), a0, a0 + int(rng.integers(40, 160)),
+                    (245, 245, 245), 1, cv2.LINE_AA)
+    cx, cy, r = ring
+    for _ in range(n_plates):
+        th = rng.uniform(0, 2 * np.pi)
+        x, y = int(cx + r * np.cos(th)), int(cy + r * np.sin(th))
+        f[y - 9:y + 9, x - 16:x + 16] = (60, 40, 30)
+    return f

@@ -40,15 +40,18 @@ class FrameRecord:
     sig: np.ndarray | None = None
 
 
-def analyze_frame(t: float, frame: np.ndarray, overlay: dict[str, Any], book: GlyphBook) -> FrameRecord:
+def analyze_frame(t: float, frame: np.ndarray, overlay: dict[str, Any], book: GlyphBook,
+                  priors: dict[str, ZoneResult] | None = None) -> FrameRecord:
+    """priors: per layout, a ring found in a nearby earlier frame (helps when the ring is mostly hidden)."""
     sc = classify_scene(frame, overlay)
     rec = FrameRecord(t, sc.scene, sc.confidence)
+    prior = (priors or {}).get(sc.scene)
     if sc.scene == "map_view":
-        rec.zone = detect_zone(frame, overlay, "map_view")
+        rec.zone = detect_zone(frame, overlay, "map_view", prior)
         rec.rows = read_sidebar(frame, overlay, book)
         rec.sig = match_sig(frame, overlay, "map_view")
     elif sc.scene == "match_start":
-        rec.zone = detect_zone(frame, overlay, "match_start")
+        rec.zone = detect_zone(frame, overlay, "match_start", prior)
     return rec
 
 
@@ -120,9 +123,14 @@ def run(settings, video: dict[str, Any], overlay: dict[str, Any], book: GlyphBoo
     budget = {"map_view": max_debug, "match_start": max(4, max_debug // 6), "low": max(4, max_debug // 4)}
     seen = {"map_view": 0, "match_start": 0}
     every = max(debug_every, 1)
+    last_zone: dict[str, tuple[float, ZoneResult]] = {}   # per layout: (t, zone) of the last ring found
+    prior_s = float((overlay.get("zone") or {}).get("prior_max_s", 15))
     for t, frame in frames:
-        rec = analyze_frame(t, frame, overlay, book)
+        priors = {k: z for k, (tz, z) in last_zone.items() if t - tz <= prior_s}
+        rec = analyze_frame(t, frame, overlay, book, priors)
         recs.append(rec)
+        if rec.zone is not None and rec.zone.found:
+            last_zone[rec.scene] = (t, rec.zone)
         if rec.scene in seen:
             seen[rec.scene] += 1
             low = (rec.scene == "map_view" and (not (rec.zone and rec.zone.found)
@@ -159,6 +167,7 @@ def run(settings, video: dict[str, Any], overlay: dict[str, Any], book: GlyphBoo
             "video_id": vid, "t": r.t, "scene": r.scene, "scene_conf": r.scene_conf, "match_no": match_of(r.t),
             "zone_found": bool(z and z.found), "zone_cx": z.cx if z else None, "zone_cy": z.cy if z else None,
             "zone_r": z.r if z else None, "zone_conf": z.confidence if z else None,
+            "zone_detail": z.detail if z else None,
         })
         for row in r.rows:
             d = asdict(row)

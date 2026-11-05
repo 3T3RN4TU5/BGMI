@@ -323,6 +323,9 @@ def analyze(
 def grab(
     video_id: str = typer.Argument(..., help="Video id or its first characters"),
     at: list[str] = typer.Option(..., "--at", help="Time to grab, e.g. 2:21:24 (repeat --at)"),
+    from_: Optional[str] = typer.Option(None, "--from", help="Decode like `analyze --start FROM`, so the "
+                                         "frames are exactly the ones analyze saw (slower)"),
+    every: Optional[float] = typer.Option(None, help="With --from: seconds between frames (default sample_every_s)"),
     overlay_id: Optional[str] = typer.Option(None, "--overlay"),
     settings_path: Optional[Path] = SettingsOpt,
 ) -> None:
@@ -342,13 +345,28 @@ def grab(
     assert_writable(s, out)
     out.mkdir(parents=True, exist_ok=True)
     path = s.videos_root / v["rel_path"]
+    want = {a: _hms_to_s(a) or 0.0 for a in at}
+    if from_ is not None:
+        step = every or s.sample_every_s
+        t0 = _hms_to_s(from_) or 0.0
+        found = {}
+        for t, fr in iter_frames(s, path, t0, max(want.values()) + step, step):
+            for a, ta in want.items():
+                if a not in found and abs(t - ta) < step / 2:
+                    found[a] = fr.copy()
+            if len(found) == len(want):
+                break
+    else:
+        found = {}
+        for a, ta in want.items():
+            got = next(iter(iter_frames(s, path, ta, ta + 1.0, 1.0)), None)
+            if got is not None:
+                found[a] = got[1]
     for a in at:
-        t = _hms_to_s(a) or 0.0
-        got = next(iter(iter_frames(s, path, t, t + 1.0, 1.0)), None)
-        if got is None:
+        frame = found.get(a)
+        if frame is None:
             console.print(f"{a}: no frame")
             continue
-        frame = got[1]
         stem = a.replace(":", "")
         cv2.imwrite(str(out / f"{stem}.png"), frame)
         sc = classify_scene(frame, ov)

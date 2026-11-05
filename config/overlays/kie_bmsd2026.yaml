@@ -80,6 +80,8 @@ zone:
   r_min: 40
   r_max: 1500
   inlier_px: 2.0
-  iterations: 1500
+  iterations: 3000                # split between global, one-piece and near-previous-ring samples
+  prior_max_s: 15                 # use the last ring found within this many seconds as a hint
+  prior_band: 0.35                # "near" = within this share of its radius
   max_points: 2500                # RANSAC scores on a random subset of ring pixels
   min_coverage: 0.6               # share of the visible ring that must be found

@@ -57,6 +57,24 @@ def test_zone_none_without_ring(ov):
     assert not z.found and z.cx is None and z.confidence == 0
 
 
+@pytest.mark.parametrize("seed", [3, 5])
+def test_zone_mostly_hidden_small_ring(ov, seed):
+    # only ~5% of the mask is ring: plain RANSAC misses it, the Hough fallback finds it
+    z = detect_zone(synth.cluttered_ring(ov, seed), ov)
+    assert z.found and z.r == pytest.approx(130, abs=3), z
+
+
+def test_zone_prior_from_previous_frame(ov):
+    prev = ZoneResult(True, 664, 418, 136, 0.8, 0.8, "")       # a few px off: the ring moved/shrank
+    z = detect_zone(synth.cluttered_ring(ov, 0), ov, prior=prev)
+    assert z.found and z.cx == pytest.approx(660, abs=3) and z.r == pytest.approx(130, abs=3), z
+
+
+def test_zone_clutter_alone_is_not_a_ring(ov):
+    z = detect_zone(synth.cluttered_ring(ov, 1, ring=(-5000, -5000, 10)), ov)
+    assert not z.found, z
+
+
 def test_flag_jumps_keeps_values():
     a = ZoneResult(True, 100, 100, 50, 0.9, 0.9, "")
     b = ZoneResult(True, 400, 400, 200, 0.9, 0.9, "")
