@@ -57,6 +57,7 @@ scene:
 # grey = dead. Confirmed by Jeevan from the organisers on 2026-11-05 (the on-screen
 # legend's KNOCK/ELIM swatches do not match this; ignore the legend).
 bars:
+  meaning: { white: alive, red: knocked, grey: dead }   # changes per tournament: set it per overlay
   white_min: 200                  # min(B, G, R) for a white (health) pixel
   red_min_r: 170                  # red: R >= this and R - max(G, B) >= red_min_gap
   red_min_gap: 90

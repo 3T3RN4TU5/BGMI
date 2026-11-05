@@ -182,3 +182,11 @@ def test_run_writes_outputs(make_settings, ov):
     assert json.loads((res.out_dir / "matches.json").read_text())["matches"][0]["map_frames"] == 110
     assert len(list(res.debug_dir.glob("*.jpg"))) >= 3
     assert len(res.teams) == 110 * 16 and set(res.teams["alive"]) == {4}
+
+
+def test_bar_meaning_is_per_overlay(ov):
+    import copy
+    ov2 = copy.deepcopy(ov)
+    ov2["bars"]["meaning"] = {"red": "dead", "grey": "knocked"}
+    reads = read_sidebar(synth.map_view(ov2, _rows(synth.TAGS, ["00"] * 16, ["AKDD"] * 16)), ov2, GlyphBook())
+    assert reads[0].bars == ("alive", "dead", "knocked", "knocked") and reads[0].alive == 3

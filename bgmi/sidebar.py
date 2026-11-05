@@ -135,6 +135,8 @@ def read_bars(frame: np.ndarray, overlay: dict[str, Any], k: int) -> tuple[tuple
     w = int(sb["bars"].get("w", 4))
     states, health = [], []
     min_px = int(cfg.get("min_px", 2))
+    # what each colour means differs between tournaments: set per overlay
+    meaning = {"white": "alive", "red": "knocked", "grey": "dead", **(cfg.get("meaning") or {})}
     for x in sb["bars"]["x"]:
         col = frame[t + int(dy1):t + int(dy2), int(x):int(x) + w].astype(np.int16)
         b, g, r = col[..., 0], col[..., 1], col[..., 2]
@@ -143,16 +145,16 @@ def read_bars(frame: np.ndarray, overlay: dict[str, Any], k: int) -> tuple[tuple
                     & (r - np.maximum(g, b) >= int(cfg.get("red_min_gap", 90)))).any(axis=1)
         n_white, n_red = int(white_rows.sum()), int(red_rows.sum())
         if n_red >= max(min_px, 3) and n_red >= n_white:
-            states.append("knocked")
+            states.append(meaning["red"])
             health.append(0.0)
         elif n_white >= min_px:
-            states.append("alive")
-            health.append(round(n_white / len(white_rows), 2))
+            states.append(meaning["white"])
+            health.append(round(n_white / len(white_rows), 2) if meaning["white"] == "alive" else 0.0)
         else:
             # an empty slot is grey (dead); anything else (e.g. a pop-up over the table) is unknown
             med = np.median(col.reshape(-1, 3), axis=0)
             grey = float(med.max() - med.min()) <= 50 and 40 <= float(med.mean()) <= 170
-            states.append("dead" if grey else "unknown")
+            states.append(meaning["grey"] if grey else "unknown")
             health.append(0.0)
     return tuple(states), tuple(health)
 
