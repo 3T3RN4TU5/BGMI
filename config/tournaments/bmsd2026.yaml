@@ -1,0 +1,7 @@
+# BMSD 2026 schedule: which match numbers and maps each day holds.
+# Key: "<stage>/<day>" as the catalog normalises them. From the PRD §6 schedule screen.
+tournament: BMSD 2026
+schedule:
+  "Finals/Day 3":
+    first_match: 13
+    maps: [Rondo, Erangel, Erangel, Erangel, Miramar, Miramar]   # Matches 13-18

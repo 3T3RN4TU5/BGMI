@@ -1,6 +1,6 @@
-# Broadcaster overlay: KIE map stream, BMSD 2026 (values from PRD §6).
-# Boxes are [x1, y1, x2, y2] in pixels at `resolution`. First guesses from the
-# PRD; measured on real frames during PRD build phases 0-1.
+# Broadcaster overlay: KIE map stream, BMSD 2026.
+# Boxes are [x1, y1, x2, y2] in pixels at `resolution`, colours are [B, G, R].
+# Measured on real BMSD 2026 Finals Day 3 frames (Matches 14-16, 18) on 2026-11-05.
 id: kie_bmsd2026
 resolution: [1280, 720]
 
@@ -10,11 +10,59 @@ layouts:
     sidebar_left:
       box: [0, 0, 292, 720]
       rows: 16
-      first_row_y: 54
-      row_h: 40
+      first_row_y: 33             # top of row 1 (separator lines sit at 73, 113, ...)
+      row_h: 40.3                 # row pitch in px (rows 1-16 span y 33-678)
+      text_y: [11, 33]            # text / bar band inside a row, relative to the row top
+      tag_x: [103, 178]           # team tag text (left aligned at x 107)
+      fin_digits_x: [[186, 199], [198, 211]]   # FIN. (finishes): two digits, 10 px apart
+      bars:                       # STATUS: 4 vertical bars, one per player
+        x: [232, 242, 252, 262]   # left edge of each bar
+        w: 4
     sidebar_right: [987, 0, 1280, 720]
-  match_start:                    # Layout B: full map with plane path
-    map_box: [0, 0, 1280, 720]
+    match_no: [1208, 233, 1221, 248]   # units digit of N in "DAY 3 - MATCH N"
+  match_start:                    # Layout B: full map with team tiles
+    map_box: [285, 0, 997, 720]
+    match_no: [226, 131, 239, 148]     # units digit of N in "DAY 3 - MATCH N", top left
+
+# Scene classifier (bgmi/scene.py): solid-colour probes on fixed overlay graphics.
+# A probe passes when >= min_frac of its pixels are within tol of colour.
+# A scene matches when at least `need` of its probes pass.
+scene:
+  map_view:
+    need: 2
+    probes:
+      - { name: header_bar,      box: [0, 2, 290, 26],      color: [70, 205, 149], tol: 45, min_frac: 0.8 }
+      - { name: finish_leaders,  box: [1008, 256, 1040, 278], color: [70, 205, 149], tol: 45, min_frac: 0.8 }
+  match_start:
+    need: 12                      # 16 lime team-tag strips; eliminated teams turn red
+    probes:
+      - { name: tile_l1, box: [33, 260, 84, 263],   color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l2, box: [156, 260, 206, 263], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l3, box: [33, 391, 84, 394],   color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l4, box: [156, 391, 206, 394], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l5, box: [33, 522, 84, 525],   color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l6, box: [156, 522, 206, 525], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l7, box: [33, 654, 84, 657],   color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_l8, box: [156, 654, 206, 657], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r1, box: [1028, 260, 1078, 263], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r2, box: [1151, 260, 1202, 263], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r3, box: [1028, 391, 1078, 394], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r4, box: [1151, 391, 1202, 394], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r5, box: [1028, 522, 1078, 525], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r6, box: [1151, 522, 1202, 525], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r7, box: [1028, 654, 1078, 657], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+      - { name: tile_r8, box: [1151, 654, 1202, 657], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
+
+# Alive bars (bgmi/sidebar.py). Observed: white = alive (bar height = health),
+# grey = dead (stays grey for the rest of the match), red = short-lived, read as knocked.
+# The on-screen legend says KNOCK = grey and ELIM = red; that does not fit grey
+# bars that persist for 10+ minutes, so this mapping is to be confirmed by hand.
+bars:
+  white_min: 200                  # min(B, G, R) for a white (health) pixel
+  red_min_r: 170                  # red: R >= this and R - max(G, B) >= red_min_gap
+  red_min_gap: 90
+  min_px: 2                       # pixels of a colour needed to call a bar that colour
+  knocked_counts_alive: true
 
 # Video type detection (bgmi/videotype.py)
 videotype:
@@ -23,6 +71,15 @@ videotype:
   min_match_frac: 0.15            # a sample must match this share of other samples
   min_row_periodicity: 0.2        # brightness autocorrelation at the row pitch
 
-zone:                             # used from PRD build phase 1
-  s_max: 40
-  v_min: 200
+# Safe-zone circle (bgmi/zone.py): thin white ring, found with a top-hat filter + RANSAC.
+zone:
+  s_max: 60                       # max HSV saturation of ring pixels
+  v_min: 170                      # min HSV value of ring pixels
+  tophat_k: 7                     # top-hat kernel (px): keeps lines thinner than this
+  tophat_min: 40
+  r_min: 40
+  r_max: 1500
+  inlier_px: 2.0
+  iterations: 1500
+  max_points: 2500                # RANSAC scores on a random subset of ring pixels
+  min_coverage: 0.6               # share of the visible ring that must be found

@@ -4,6 +4,9 @@
     python cli.py catalog           scan videos_root, probe and type-detect new videos
     python cli.py status            show the processing queue
     python cli.py requeue           put failed videos back in the queue
+    python cli.py calibrate         learn team-tag / digit templates from a labelled frame
+    python cli.py analyze           phase 1: scenes, matches, zone and team table for a time range
+    python cli.py scenes            sample frames for the scene-classifier check (contact sheets + CSV)
 """
 from __future__ import annotations
 
@@ -165,6 +168,216 @@ def diskcheck(settings_path: Optional[Path] = SettingsOpt) -> None:
     except DiskSpaceError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1)
+
+
+def _hms_to_s(text: Optional[str]) -> Optional[float]:
+    """'2:05:00', '125:00' or '7500' -> seconds."""
+    if text is None or text == "":
+        return None
+    parts = [float(p) for p in str(text).split(":")]
+    sec = 0.0
+    for p in parts:
+        sec = sec * 60 + p
+    return sec
+
+
+def _find_video(q: Queue, prefix: str):
+    rows = [r for r in q.all() if r["video_id"].startswith(prefix)]
+    if len(rows) != 1:
+        console.print(f"[red]{'No' if not rows else 'More than one'} video matches id '{prefix}'.[/red] "
+                      "Run `python cli.py status` for the ids.")
+        raise typer.Exit(2)
+    return rows[0]
+
+
+def _overlay(s: Settings, video_row, overlay_id: Optional[str]) -> dict:
+    overlays = load_overlays(s.config_dir)
+    oid = overlay_id or (video_row["overlay"] if video_row is not None else None) or next(iter(overlays), None)
+    if oid not in overlays:
+        console.print(f"[red]Unknown overlay '{oid}'.[/red] Known: {', '.join(overlays) or 'none'}")
+        raise typer.Exit(2)
+    return overlays[oid]
+
+
+def _schedule(s: Settings, video_row) -> Optional[dict]:
+    import yaml  # noqa: PLC0415
+
+    key = f"{video_row['stage']}/{video_row['day']}"
+    for f in sorted((s.config_dir / "tournaments").glob("*.yaml")):
+        data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        if data.get("tournament") == video_row["tournament"] and key in (data.get("schedule") or {}):
+            return data["schedule"][key]
+    return None
+
+
+@app.command()
+def calibrate(
+    image: Path = typer.Argument(..., exists=True, dir_okay=False, help="A map-view frame (.jpg/.png, 1280x720)"),
+    tags: str = typer.Option(..., help="Team tags top to bottom, space separated (16)"),
+    fins: Optional[str] = typer.Option(None, help="FIN. values top to bottom, e.g. '04 02 01 ...'"),
+    match_no: Optional[int] = typer.Option(None, help="Match number shown on this frame"),
+    overlay_id: Optional[str] = typer.Option(None, "--overlay"),
+    settings_path: Optional[Path] = SettingsOpt,
+) -> None:
+    """Learn team-tag, digit and match-number templates from one labelled frame.
+
+    Templates are cut from the broadcast, so they are saved under data_root/calib (never in git).
+    """
+    import cv2  # noqa: PLC0415
+
+    from bgmi.analyze import glyph_path  # noqa: PLC0415
+    from bgmi.scene import classify_scene  # noqa: PLC0415
+    from bgmi.segment import match_sig  # noqa: PLC0415
+    from bgmi.sidebar import GlyphBook, learn  # noqa: PLC0415
+
+    s = _settings(settings_path)
+    ov = _overlay(s, None, overlay_id)
+    frame = cv2.imread(str(image))
+    w, h = ov["resolution"]
+    if frame is None or frame.shape[:2] != (int(h), int(w)):
+        console.print(f"[red]{image} must be a {w}x{h} image[/red]")
+        raise typer.Exit(2)
+    sc = classify_scene(frame, ov)
+    if sc.scene != "map_view":
+        console.print(f"[red]{image.name} does not look like the map view ({sc.detail}).[/red]")
+        raise typer.Exit(2)
+    path = glyph_path(s.data_root, ov["id"])
+    book = GlyphBook.load(path)
+    try:
+        learn(book, frame, ov, tags.split(), fins.split() if fins else None)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(2)
+    if match_no is not None:
+        book.add(f"matchno:{match_no}", match_sig(frame, ov, "map_view"))
+    book.save(path)
+    console.print(f"Saved {sum(len(v) for v in book.items.values())} templates "
+                  f"({len(book.labels('tag'))} teams, digits {''.join(book.labels('digit')) or '-'}, "
+                  f"match numbers {', '.join(book.labels('matchno')) or '-'}) to {path}")
+
+
+@app.command()
+def analyze(
+    video_id: str = typer.Argument(..., help="Video id or its first characters (see `status`)"),
+    start: Optional[str] = typer.Option(None, help="Start time, e.g. 2:05:00 (default: video start)"),
+    end: Optional[str] = typer.Option(None, help="End time, e.g. 2:40:00 (default: video end)"),
+    every: Optional[float] = typer.Option(None, help="Seconds between sampled frames (default: sample_every_s)"),
+    debug_every: int = typer.Option(20, help="Save a debug image every N map frames"),
+    overlay_id: Optional[str] = typer.Option(None, "--overlay"),
+    settings_path: Optional[Path] = SettingsOpt,
+) -> None:
+    """PRD build phase 1: scenes, match boundaries, zone and team table for a time range."""
+    from bgmi.analyze import glyph_path, run  # noqa: PLC0415
+    from bgmi.media import iter_frames  # noqa: PLC0415
+    from bgmi.sidebar import GlyphBook  # noqa: PLC0415
+
+    s = _settings(settings_path)
+    log_path = setup_logging(s.logs_dir, "analyze")
+    q = Queue(s.state_db)
+    v = _find_video(q, video_id)
+    ov = _overlay(s, v, overlay_id)
+    book = GlyphBook.load(glyph_path(s.data_root, ov["id"]))
+    if not book.labels("tag"):
+        console.print("[yellow]No team templates yet: team names will be empty. "
+                      "Run `python cli.py calibrate` first.[/yellow]")
+    try:
+        ensure_free_space(s)
+    except DiskSpaceError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    t0 = _hms_to_s(start) or 0.0
+    t1 = _hms_to_s(end) or float(v["duration_s"] or 0)
+    step = every or s.sample_every_s
+    path = s.videos_root / v["rel_path"]
+    schedule = _schedule(s, v)
+    log(logger, "analyze start", video_id=v["video_id"], start=t0, end=t1, every=step)
+    with console.status("Analysing...") as st:
+        res = run(s, dict(v), ov, book, iter_frames(s, path, t0, t1, step), schedule,
+                  debug_every=debug_every,
+                  progress=lambda t: st.update(f"Analysing {_fmt_dur(t)} of {_fmt_dur(t1)}"))
+    log(logger, "analyze done", video_id=v["video_id"], **{k: v_ for k, v_ in res.quality.items() if k != "per_match"})
+
+    table = Table(title="Matches found")
+    for col in ("match", "map", "start", "end", "length", "map frames", "number from", "note"):
+        table.add_column(col)
+    for m in res.matches:
+        table.add_row(str(m["match_no"]), m["map"] or "-", _fmt_dur(m["start_s"]), _fmt_dur(m["end_s"]),
+                      _fmt_dur(m["duration_s"]), str(m["map_frames"]), m["match_no_source"], m["note"])
+    console.print(table)
+    qd = res.quality
+    console.print(f"Frames: {qd.get('frames')}  scenes: {qd.get('scenes')}")
+    console.print(f"Zone found on {(qd.get('zone_found_share') or 0):.0%} of map frames; "
+                  f"team read {(qd.get('tag_read_share') or 0):.0%}, alive read {(qd.get('alive_read_share') or 0):.0%}, "
+                  f"finishes read {(qd.get('fin_read_share') or 0):.0%} of table rows")
+    console.print(f"Output: {res.out_dir}\nDebug images: {res.debug_dir}\n[dim]log: {log_path}[/dim]")
+
+
+@app.command()
+def scenes(
+    video_id: str = typer.Argument(..., help="Video id or its first characters"),
+    n: int = typer.Option(200, help="Frames to sample across the video"),
+    score: bool = typer.Option(False, help="Score the filled-in CSV instead of sampling"),
+    overlay_id: Optional[str] = typer.Option(None, "--overlay"),
+    settings_path: Optional[Path] = SettingsOpt,
+) -> None:
+    """Scene-classifier check: sample N frames, write contact sheets + a CSV to fill in, then --score."""
+    import csv  # noqa: PLC0415
+
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    from bgmi.media import grab_frame  # noqa: PLC0415
+    from bgmi.scene import classify_scene  # noqa: PLC0415
+
+    s = _settings(settings_path)
+    q = Queue(s.state_db)
+    v = _find_video(q, video_id)
+    out = s.debug_dir / v["video_id"] / "scenes"
+    csv_path = out / "scene_check.csv"
+    if score:
+        if not csv_path.exists():
+            console.print(f"[red]{csv_path} not found: run without --score first.[/red]")
+            raise typer.Exit(2)
+        rows = list(csv.DictReader(csv_path.open(encoding="utf-8")))
+        done = [r for r in rows if (r.get("truth") or "").strip()]
+        if not done:
+            console.print("Fill the 'truth' column (map_view / match_start / other) first; leave it as is when right.")
+            raise typer.Exit(2)
+        wrong = [r for r in done if r["truth"].strip() != r["predicted"]]
+        acc = 1 - len(wrong) / len(done)
+        console.print(f"Scene accuracy: {acc:.1%} on {len(done)} labelled frames (gate: >= 98%)")
+        for r in wrong:
+            console.print(f"  #{r['idx']} at {r['time']}: predicted {r['predicted']}, truth {r['truth']}")
+        raise typer.Exit(0 if acc >= 0.98 else 1)
+
+    ov = _overlay(s, v, overlay_id)
+    out.mkdir(parents=True, exist_ok=True)
+    dur = float(v["duration_s"] or 0)
+    times = [dur * (i + 0.5) / n for i in range(n)]
+    w, h = (int(x) for x in ov["resolution"])
+    thumbs, rows = [], []
+    with console.status("Sampling frames...") as st:
+        for i, t in enumerate(times):
+            st.update(f"Frame {i + 1}/{n}")
+            f = grab_frame(s, s.videos_root / v["rel_path"], t, (w, h))
+            pred = classify_scene(f, ov).scene if f is not None else "unreadable"
+            rows.append({"idx": i + 1, "time": _fmt_dur(t), "predicted": pred, "truth": pred})
+            th = cv2.resize(f, (256, 144)) if f is not None else np.zeros((144, 256, 3), np.uint8)
+            cv2.rectangle(th, (0, 0), (256, 18), (0, 0, 0), -1)
+            cv2.putText(th, f"#{i + 1} {pred}", (4, 13), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+            thumbs.append(th)
+    for k in range(0, len(thumbs), 25):
+        page = thumbs[k:k + 25] + [np.zeros((144, 256, 3), np.uint8)] * (25 - len(thumbs[k:k + 25]))
+        sheet = np.vstack([np.hstack(page[r * 5:(r + 1) * 5]) for r in range(5)])
+        cv2.imwrite(str(out / f"sheet_{k // 25 + 1:02d}.jpg"), sheet, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        wr = csv.DictWriter(fh, fieldnames=["idx", "time", "predicted", "truth"])
+        wr.writeheader()
+        wr.writerows(rows)
+    counts = {k: sum(r["predicted"] == k for r in rows) for k in ("map_view", "match_start", "other", "unreadable")}
+    console.print(f"Predicted: {counts}")
+    console.print(f"Contact sheets + CSV in {out}. Look through the sheets, fix the 'truth' column where the "
+                  "label is wrong, then run with --score.")
 
 
 def _print_videos(q: Queue, title: str) -> None:
