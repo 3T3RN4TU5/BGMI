@@ -8,8 +8,10 @@ matches are ignored (they belong to no match).
 
 - start = first match-start screen (or first map-view frame) of the run
 - end   = last map-view frame of the run
-- number: read from the crop when a learned template matches (`calibrate
-  --match-no`), otherwise counted from the schedule's first match number.
+- number: read from the crop when learned templates match (`calibrate
+  --match-no`), by majority vote over the segment's map frames. Otherwise
+  counted on from a read match, or from the schedule's first match only when
+  the run starts at the video start. Else unknown (never a guess).
 - map: from the tournament schedule config (the overlay shows no map name).
 """
 from __future__ import annotations
@@ -38,15 +40,18 @@ class Segment:
     n_map: int = 0
     n_start: int = 0
     ref_sig: np.ndarray | None = field(default=None, repr=False)
+    sigs: list[np.ndarray] = field(default_factory=list, repr=False)
     number: int | None = None
-    number_source: str = ""          # read | schedule
+    number_source: str = ""          # read | counted | schedule | given | unknown
+    number_votes: str = ""           # e.g. "41/44 frames read 15"
     map_name: str | None = None
     kept: bool = True
     note: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "match_no": self.number, "match_no_source": self.number_source, "map": self.map_name,
+            "match_no": self.number, "match_no_source": self.number_source,
+            "match_no_votes": self.number_votes, "map": self.map_name,
             "start_s": round(self.start_t, 1), "end_s": round(self.end_t, 1),
             "duration_s": round(self.end_t - self.start_t, 1),
             "map_frames": self.n_map, "start_screens": self.n_start, "note": self.note,
@@ -92,8 +97,10 @@ def segment(obs: Sequence[FrameObs], cfg: dict[str, Any] | None = None) -> list[
             if cur is None or (not _same(o.sig, cur.ref_sig, min_corr) and o.t - cur.end_t >= min_gap):
                 cur = Segment(o.t, o.t)
                 segs.append(cur)
-            if cur.ref_sig is None and o.sig is not None:
-                cur.ref_sig = o.sig
+            if o.sig is not None:
+                if cur.ref_sig is None:
+                    cur.ref_sig = o.sig
+                cur.sigs.append(o.sig)
             cur.n_map += 1
             cur.end_t = o.t
     min_frames = int(cfg.get("min_map_frames", 20))
@@ -107,7 +114,7 @@ def segment(obs: Sequence[FrameObs], cfg: dict[str, Any] | None = None) -> list[
 
 def read_match_no(sig: np.ndarray | None, book: GlyphBook, min_score: float = 0.97,
                   min_margin: float = 0.015) -> int | None:
-    """Match number from learned templates (calibrate --match-no). None unless clear."""
+    """Match number of one crop from learned templates (calibrate --match-no). None unless clear."""
     if sig is None:
         return None
     scores = sorted(((max(match(sig, t) for t in book.items[f"matchno:{lab}"]), lab)
@@ -119,22 +126,62 @@ def read_match_no(sig: np.ndarray | None, book: GlyphBook, min_score: float = 0.
     return int(scores[0][1])
 
 
-def number_matches(segs: Sequence[Segment], book: GlyphBook, schedule: dict[str, Any] | None) -> None:
-    """Fill number/map for kept segments: read numbers win, the schedule fills gaps."""
+def vote_match_no(sigs: Sequence[np.ndarray], book: GlyphBook, min_votes: int = 3,
+                  min_share: float = 0.6, max_frames: int = 60) -> tuple[int | None, str]:
+    """Majority vote over a segment's frames, so one faded or covered frame cannot decide.
+
+    Returns (number or None, "k/n frames read N").
+    """
+    if not sigs or not book.labels("matchno"):
+        return None, ""
+    step = max(1, len(sigs) // max_frames)
+    reads = [read_match_no(s, book) for s in sigs[::step]]
+    got = [r for r in reads if r is not None]
+    if not got:
+        return None, f"0/{len(reads)} frames read"
+    best = max(set(got), key=got.count)
+    k = got.count(best)
+    detail = f"{k}/{len(reads)} frames read {best}"
+    if k >= min(min_votes, len(reads)) and k / len(got) >= min_share:
+        return best, detail
+    return None, detail
+
+
+def number_matches(segs: Sequence[Segment], book: GlyphBook, schedule: dict[str, Any] | None,
+                   from_video_start: bool = True, first_match: int | None = None) -> None:
+    """Fill number/map for kept segments.
+
+    Read numbers win. Unread segments are counted on from a read one. With nothing
+    read, numbering starts at `first_match` when given (e.g. `analyze --first-match`),
+    else at the schedule's first match only if the run started at the video start:
+    a run over part of a day cannot know how many matches it skipped, so its
+    numbers stay unknown instead of guessed.
+    """
     kept = [s for s in segs if s.kept]
-    first = int((schedule or {}).get("first_match", 1))
+    sched_first = int((schedule or {}).get("first_match", 1))
     maps = list((schedule or {}).get("maps", []))
     for s in kept:
-        n = read_match_no(s.ref_sig, book)
+        n, s.number_votes = vote_match_no(s.sigs or ([s.ref_sig] if s.ref_sig is not None else []), book)
         if n is not None:
             s.number, s.number_source = n, "read"
-    # schedule numbering, anchored on any read number so one missed match does not shift the rest
-    anchor = next(((i, s.number) for i, s in enumerate(kept) if s.number is not None), (0, first))
+    read = next(((i, s.number) for i, s in enumerate(kept) if s.number is not None), None)
+    if read is not None:
+        anchor, source = read, "counted"
+    elif first_match is not None:
+        anchor, source = (0, int(first_match)), "given"
+    elif from_video_start and schedule:
+        anchor, source = (0, sched_first), "schedule"
+    else:
+        anchor, source = None, "unknown"
     for i, s in enumerate(kept):
+        if anchor is None:
+            s.number_source = "unknown"
+            s.note = (s.note + "; " if s.note else "") + "match number not read: run `calibrate --match-no` or pass --first-match"
+            continue
         expect = anchor[1] + (i - anchor[0])
         if s.number is None:
-            s.number, s.number_source = expect, "schedule"
+            s.number, s.number_source = expect, source
         elif s.number != expect:
             s.note = (s.note + "; " if s.note else "") + f"read {s.number}, order suggests {expect}"
-        idx = s.number - first
+        idx = s.number - sched_first
         s.map_name = maps[idx] if 0 <= idx < len(maps) else None

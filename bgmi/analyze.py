@@ -105,6 +105,7 @@ class RunResult:
 def run(settings, video: dict[str, Any], overlay: dict[str, Any], book: GlyphBook,
         frames: Iterable[tuple[float, np.ndarray]], schedule: dict[str, Any] | None,
         debug_every: int = 20, max_debug: int = 60,
+        from_video_start: bool = True, first_match: int | None = None,
         progress: Callable[[float], None] | None = None) -> RunResult:
     vid = video["video_id"]
     out_dir = Path(settings.data_root) / "out" / vid
@@ -135,7 +136,7 @@ def run(settings, video: dict[str, Any], overlay: dict[str, Any], book: GlyphBoo
         r.zone = z
 
     segs = segment([FrameObs(r.t, r.scene, r.sig) for r in recs])
-    number_matches(segs, book, schedule)
+    number_matches(segs, book, schedule, from_video_start, first_match)
     kept = [s for s in segs if s.kept]
 
     def match_of(t: float) -> int | None:

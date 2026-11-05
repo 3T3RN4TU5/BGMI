@@ -160,7 +160,43 @@ def test_number_matches_schedule_and_read_anchor():
     segs = segment(obs)
     number_matches(segs, book, {"first_match": 13, "maps": ["Rondo", "Erangel", "Erangel", "Erangel", "Miramar"]})
     assert [(s.number, s.number_source, s.map_name) for s in segs] == [
-        (15, "schedule", "Erangel"), (16, "read", "Erangel"), (17, "schedule", "Miramar")]
+        (15, "counted", "Erangel"), (16, "read", "Erangel"), (17, "counted", "Miramar")]
+
+
+def _one_match(sig_id=0, n=150):
+    return segment([FrameObs(3 * i, "map_view", _sig(sig_id)) for i in range(n)])
+
+
+SCHED = {"first_match": 13, "maps": ["Rondo", "Erangel", "Erangel", "Erangel", "Miramar"]}
+
+
+def test_number_unknown_for_partial_range_without_read():
+    # a run from 2:05:00 must not assume it starts at the day's first match
+    segs = _one_match()
+    number_matches(segs, GlyphBook(), SCHED, from_video_start=False)
+    assert (segs[0].number, segs[0].number_source, segs[0].map_name) == (None, "unknown", None)
+    assert "--first-match" in segs[0].note
+
+
+def test_number_given_first_match_and_schedule_from_start():
+    segs = _one_match()
+    number_matches(segs, GlyphBook(), SCHED, from_video_start=False, first_match=15)
+    assert (segs[0].number, segs[0].number_source, segs[0].map_name) == (15, "given", "Erangel")
+    segs = _one_match()
+    number_matches(segs, GlyphBook(), SCHED, from_video_start=True)
+    assert (segs[0].number, segs[0].number_source, segs[0].map_name) == (13, "schedule", "Rondo")
+
+
+def test_number_read_by_vote_survives_bad_first_frame():
+    book = GlyphBook()
+    book.add("matchno:15", _sig(0))
+    book.add("matchno:16", _sig(4))
+    obs = [FrameObs(0, "map_view", np.zeros_like(_sig(0)))]       # a faded first frame
+    obs += [FrameObs(3 + 3 * i, "map_view", _sig(0)) for i in range(150)]
+    segs = segment(obs)
+    number_matches(segs, book, SCHED, from_video_start=False, first_match=13)
+    assert (segs[0].number, segs[0].number_source, segs[0].map_name) == (15, "read", "Erangel")
+    assert segs[0].number_votes.endswith("frames read 15")
 
 
 # ---- whole run ---------------------------------------------------------------

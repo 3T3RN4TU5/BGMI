@@ -263,6 +263,8 @@ def analyze(
     end: Optional[str] = typer.Option(None, help="End time, e.g. 2:40:00 (default: video end)"),
     every: Optional[float] = typer.Option(None, help="Seconds between sampled frames (default: sample_every_s)"),
     debug_every: int = typer.Option(20, help="Save a debug image every N map frames"),
+    first_match: Optional[int] = typer.Option(None, help="Number of the first match in this range, "
+                                              "used only when no match number can be read"),
     overlay_id: Optional[str] = typer.Option(None, "--overlay"),
     settings_path: Optional[Path] = SettingsOpt,
 ) -> None:
@@ -280,6 +282,9 @@ def analyze(
     if not book.labels("tag"):
         console.print("[yellow]No team templates yet: team names will be empty. "
                       "Run `python cli.py calibrate` first.[/yellow]")
+    if not book.labels("matchno"):
+        console.print("[yellow]No match-number templates: numbers come from --first-match or the schedule. "
+                      "Run `python cli.py calibrate IMAGE --tags ... --match-no N` to read them.[/yellow]")
     try:
         ensure_free_space(s)
     except DiskSpaceError as exc:
@@ -293,7 +298,7 @@ def analyze(
     log(logger, "analyze start", video_id=v["video_id"], start=t0, end=t1, every=step)
     with console.status("Analysing...") as st:
         res = run(s, dict(v), ov, book, iter_frames(s, path, t0, t1, step), schedule,
-                  debug_every=debug_every,
+                  debug_every=debug_every, from_video_start=t0 < 1.0, first_match=first_match,
                   progress=lambda t: st.update(f"Analysing {_fmt_dur(t)} of {_fmt_dur(t1)}"))
     log(logger, "analyze done", video_id=v["video_id"], **{k: v_ for k, v_ in res.quality.items() if k != "per_match"})
 
@@ -301,8 +306,10 @@ def analyze(
     for col in ("match", "map", "start", "end", "length", "map frames", "number from", "note"):
         table.add_column(col)
     for m in res.matches:
-        table.add_row(str(m["match_no"]), m["map"] or "-", _fmt_dur(m["start_s"]), _fmt_dur(m["end_s"]),
-                      _fmt_dur(m["duration_s"]), str(m["map_frames"]), m["match_no_source"], m["note"])
+        src = m["match_no_source"] + (f" ({m['match_no_votes']})" if m.get("match_no_votes") else "")
+        table.add_row("?" if m["match_no"] is None else str(m["match_no"]), m["map"] or "-",
+                      _fmt_dur(m["start_s"]), _fmt_dur(m["end_s"]),
+                      _fmt_dur(m["duration_s"]), str(m["map_frames"]), src, m["note"])
     console.print(table)
     qd = res.quality
     console.print(f"Frames: {qd.get('frames')}  scenes: {qd.get('scenes')}")
