@@ -1,0 +1,42 @@
+# Copy this file to settings.yaml and edit it. settings.yaml is git-ignored.
+# All paths may point to any drive.
+
+videos_root:  "D:\\FullStack\\BGMI\\videos"          # read-only: never modified
+project_root: "D:\\FullStack\\BGMI\\bgmi-analytics"
+data_root:    "D:\\FullStack\\BGMI\\data"            # pipeline output, logs, debug
+
+# Folder that holds ffmpeg.exe and ffprobe.exe. Leave empty to use PATH.
+ffmpeg_bin: "C:\\Users\\Hp\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-9.0.2-full_build\\bin"
+
+sample_every_s: 3        # frame sampling inside matches
+keep_frames: false       # delete extracted frames after each video
+min_free_gb: 5           # refuse to start a job below this free space on data_root's drive
+workers: 14              # CPU worker processes (16 threads on the Ryzen 7 7840HS)
+
+# MongoDB Atlas connection string. Keep it here or in the BGMI_MONGO_URI
+# environment variable; never commit it.
+mongo_uri: ""
+
+video_extensions: [".mp4", ".mkv", ".mov", ".ts"]
+
+# Stage folder names are normalized with these aliases (case-insensitive).
+stage_aliases:
+  "quater finals": "Quarter Finals"
+  "quater final": "Quarter Finals"
+  "quarter final": "Quarter Finals"
+  "qf": "Quarter Finals"
+  "semi final": "Semi Finals"
+  "semis": "Semi Finals"
+  "sf": "Semi Finals"
+  "grand finals": "Finals"
+  "grand final": "Finals"
+  "gf": "Finals"
+  "final": "Finals"
+  "survival stage": "Survival"
+  "league stage": "League"
+
+# Video type detection (F2). See bgmi/videotype.py.
+videotype:
+  samples: 24              # frames sampled across the video
+  skip_head_frac: 0.05     # ignore the first/last 5% (pre-show, awards)
+  min_score: 0.35          # share of samples that must look like the map layout

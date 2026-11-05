@@ -1,0 +1,28 @@
+# Broadcaster overlay: KIE map stream, BMSD 2026 (values from PRD §6).
+# Boxes are [x1, y1, x2, y2] in pixels at `resolution`. First guesses from the
+# PRD; measured on real frames during PRD build phases 0-1.
+id: kie_bmsd2026
+resolution: [1280, 720]
+
+layouts:
+  map_view:                       # Layout A: in-match map view
+    viewport: [292, 0, 987, 720]
+    sidebar_left:
+      box: [0, 0, 292, 720]
+      rows: 16
+      first_row_y: 54
+      row_h: 40
+    sidebar_right: [987, 0, 1280, 720]
+  match_start:                    # Layout B: full map with plane path
+    map_box: [0, 0, 1280, 720]
+
+# Video type detection (bgmi/videotype.py)
+videotype:
+  pixel_tol: 18                   # max per-channel difference for "same pixel"
+  static_frac: 0.75               # share of sidebar pixels that must match
+  min_match_frac: 0.15            # a sample must match this share of other samples
+  min_row_periodicity: 0.2        # brightness autocorrelation at the row pitch
+
+zone:                             # used from PRD build phase 1
+  s_max: 40
+  v_min: 200
