@@ -53,10 +53,9 @@ scene:
       - { name: tile_r7, box: [1028, 654, 1078, 657], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
       - { name: tile_r8, box: [1151, 654, 1202, 657], color: [70, 205, 149], tol: 50, min_frac: 0.7 }
 
-# Alive bars (bgmi/sidebar.py). Observed: white = alive (bar height = health),
-# grey = dead (stays grey for the rest of the match), red = short-lived, read as knocked.
-# The on-screen legend says KNOCK = grey and ELIM = red; that does not fit grey
-# bars that persist for 10+ minutes, so this mapping is to be confirmed by hand.
+# Alive bars (bgmi/sidebar.py): white = alive (bar height = health), red = knocked,
+# grey = dead. Confirmed by Jeevan from the organisers on 2026-11-05 (the on-screen
+# legend's KNOCK/ELIM swatches do not match this; ignore the legend).
 bars:
   white_min: 200                  # min(B, G, R) for a white (health) pixel
   red_min_r: 170                  # red: R >= this and R - max(G, B) >= red_min_gap
